@@ -1,1 +1,3 @@
 project_report.tex
+__pycache__/
+*.pyc
