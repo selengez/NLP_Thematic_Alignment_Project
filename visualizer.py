@@ -26,10 +26,11 @@ import os
 # ---------------------------------------------------------------------------
 sns.set_theme(style="whitegrid", palette="muted", font_scale=1.1)
 PALETTE = ["#4C72B0", "#DD8452", "#55A868", "#C44E52", "#8172B2"]
-OUTPUT_DIR = "."   # all PNGs saved to working directory by default
+OUTPUT_DIR = "visualizations"   # all PNGs saved to a dedicated folder
 
 
 def _savefig(fig: plt.Figure, filename: str, dpi: int = 150) -> None:
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
     path = os.path.join(OUTPUT_DIR, filename)
     fig.savefig(path, dpi=dpi, bbox_inches="tight")
     print(f"[visualizer] Saved → {path}")
