@@ -1,16 +1,15 @@
 """
 text_processing.py
 ------------------
-Cleans and normalizes text for embedding.
+Cleans and prepares TACL article text for embedding.
 
 KEY DECISION:
-    Stop words and stemming are deliberately NOT applied.
-    Transformer-based embedding models (like SPECTER) are trained on complete
-    sentences and benefit from full grammatical structure. Removing stop words
-    (e.g. "not", "which", "however") degrades semantic fidelity for transformers.
-    This is consistent with the sentence-transformers best-practice guidelines.
-"""
+    Each article is represented as title + abstract. Cleaning is kept minimal:
+    unicode normalization, lowercasing, URL removal, and whitespace cleanup.
 
+    Stop words and stemming are not applied because SPECTER is a transformer
+    model and works best with full sentence structure.
+"""
 import unicodedata
 import re
 import pandas as pd

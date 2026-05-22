@@ -1,25 +1,21 @@
 """
 embedder.py
 -----------
-Encodes paper texts and the journal scope with allenai-specter.
+Encodes TACL article texts and the journal Aims & Scope using allenai-specter.
 
-MODEL CHOICE — allenai-specter:
-    SPECTER (Scientific Paper Embeddings using Citation-informed TransformERs) is a
-    domain-specific BERT-based model trained on scientific paper abstracts using
-    citation graph context. It produces 768-dimensional dense vectors optimised for
-    semantic similarity tasks on academic text — the scientific-domain equivalent of
-    S-PubMedBERT used in medical-AI projects.
+MODEL CHOICE:
+    SPECTER is a scientific document embedding model trained on paper titles,
+    abstracts, and citation context. I use it because the dataset contains
+    academic NLP articles, so domain-specific scientific embeddings are more
+    suitable than generic sentence embeddings.
 
-    Why NOT generic sentence-bert (all-MiniLM-L6-v2)?
-        That model is trained on general web text. Using it for scientific papers
-        degrades cluster separation and alignment scores because it does not
-        understand domain-specific vocabulary (e.g. "transformer", "attention head",
-        "token classification" in an NLP sense).
+    The TACL Aims & Scope text is embedded with the same model and used as the
+    reference vector for cosine-similarity alignment scoring.
 
 CACHING:
-    Embeddings are saved to 'embeddings.npy' after the first run.
-    On subsequent runs the file is loaded directly — no recomputation.
-    Input texts are truncated to 512 tokens automatically by the tokenizer.
+    Article embeddings are saved to 'embeddings.npy' after the first run and
+    loaded directly on later runs. If the dataset changes, this cache should be
+    deleted and recomputed.
 """
 
 from sentence_transformers import SentenceTransformer
@@ -191,7 +187,7 @@ class TextEmbedder:
         Parameters
         ----------
         scope_text : str
-            The official Aims & Scope passage (verbatim).
+            The official Aims & Scope passage.
 
         Returns
         -------
@@ -215,7 +211,7 @@ class TextEmbedder:
         return arr
 
     # ------------------------------------------------------------------
-    # Convenience: encode or load
+    # encode or load
     # ------------------------------------------------------------------
 
     def encode_or_load(

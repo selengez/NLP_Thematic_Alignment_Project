@@ -1,17 +1,17 @@
 """
 visualizer.py
 -------------
-Produces and saves all 5 required figures as PNG files.
+Creates and saves the main figures used in the TACL thematic alignment project.
 
 Figures
 -------
-Figure 1 — paper_volume_by_year.png       : bar chart of paper counts per year
-Figure 2 — alignment_distribution.png     : histogram of cosine similarity scores
-Figure 3 — drift_over_time.png            : mean alignment score by year with ±1 std band
-Figure 4 — umap_cluster_map.png           : 2D UMAP scatter coloured by KMeans cluster
-Figure 5 — topic_market_share.png         : stacked area chart of topic % share over time
-
-All figures are saved at 150 dpi with tight layout.
+paper_volume_by_year.png           : TACL article counts per year
+abstract_length_distribution.png   : title + abstract word-count distribution
+alignment_distribution.png         : cosine-similarity alignment scores
+alignment_inspection_table.png     : high- and low-alignment article examples
+drift_over_time.png                : mean yearly alignment with ±1 std band
+umap_cluster_map.png               : 2D UMAP view of KMeans clusters
+topic_market_share.png             : yearly topic-share plot by cluster
 """
 
 import matplotlib.pyplot as plt
@@ -43,7 +43,7 @@ def _savefig(fig: plt.Figure, filename: str, dpi: int = 150) -> None:
 
 def plot_paper_volume(df: pd.DataFrame, save: bool = True) -> plt.Figure:
     """
-    Bar chart: number of papers per year (2015–2024), annotated with counts.
+    Bar chart: number of journal articles per year, annotated with counts.
     """
     counts = df.groupby("year").size().reset_index(name="count")
 
@@ -66,8 +66,10 @@ def plot_paper_volume(df: pd.DataFrame, save: bool = True) -> plt.Figure:
             fontweight="bold",
         )
 
+    year_min = int(counts['year'].min())
+    year_max = int(counts['year'].max())
     ax.set_title(
-        "Distribution of arXiv cs.CL Papers by Year (2015–2024)",
+        f"Distribution of TACL Journal Papers by Year ({year_min}–{year_max})",
         fontweight="bold",
         pad=14,
     )
@@ -127,6 +129,52 @@ def plot_alignment_distribution(df: pd.DataFrame, save: bool = True) -> plt.Figu
 
 
 # ---------------------------------------------------------------------------
+# Figure 2b — Alignment Inspection Table
+
+def plot_inspection_table(
+    df: pd.DataFrame,
+    filename: str = "alignment_inspection_table.png",
+    save: bool = True,
+) -> plt.Figure:
+    """
+    Render the qualitative inspection table as a PNG for inclusion in reports.
+    """
+    display_cols = ["Type", "title", "year", "Score", "Inspection note"]
+    table_df = df[display_cols].copy()
+
+    fig, ax = plt.subplots(figsize=(12, 2.4))
+    ax.axis("off")
+
+    table = ax.table(
+        cellText=table_df.values,
+        colLabels=table_df.columns,
+        cellLoc="left",
+        colLoc="center",
+        loc="center",
+        cellColours=[[("#f8f8f8" if row == 0 else "white") for _ in table_df.columns] for row in range(len(table_df))],
+    )
+    table.auto_set_font_size(False)
+    table.set_fontsize(10)
+    table.scale(1.2, 1.4)
+
+    for (row, col), cell in table.get_celld().items():
+        cell.set_edgecolor("black")
+        cell.set_linewidth(0.6)
+        if row == 0:
+            cell.set_text_props(weight="bold")
+            cell.set_facecolor("#d9d9d9")
+        elif col == 0:
+            cell.set_text_props(weight="bold")
+        if col in [2, 3]:
+            cell.set_text_props(ha="center")
+
+    fig.tight_layout()
+    if save:
+        _savefig(fig, filename, dpi=300)
+    return fig
+
+
+# ---------------------------------------------------------------------------
 # Figure 3 — Thematic Drift Over Time
 # ---------------------------------------------------------------------------
 
@@ -161,8 +209,13 @@ def plot_drift_over_time(yearly_stats: pd.DataFrame, save: bool = True) -> plt.F
             arrowprops=dict(arrowstyle="->", color="black", lw=1.2),
         )
 
-    ax.set_title("Thematic Drift: Mean Alignment Score by Year (2015–2024)",
-                 fontweight="bold", pad=14)
+    year_min = int(years.min())
+    year_max = int(years.max())
+    ax.set_title(
+        f"Thematic Drift: Mean Alignment Score by Year ({year_min}–{year_max})",
+        fontweight="bold",
+        pad=14,
+    )
     ax.set_xlabel("Year")
     ax.set_ylabel("Mean Cosine Similarity")
     ax.set_xticks(years)
@@ -197,7 +250,7 @@ def plot_umap_clusters(
     n_clusters = df["cluster"].nunique()
     colors = sns.color_palette("tab10", n_clusters)
 
-    fig, ax = plt.subplots(figsize=(11, 7))
+    fig, ax = plt.subplots(figsize=(9, 6))
 
     for cid in sorted(df["cluster"].unique()):
         subset = df[df["cluster"] == cid]
@@ -205,9 +258,9 @@ def plot_umap_clusters(
         ax.scatter(
             subset["umap_x"],
             subset["umap_y"],
-            s=6,
+            s=40,
             color=colors[cid],
-            alpha=0.45,
+            alpha=0.65,
             label=label,
             rasterized=True,
         )
@@ -224,15 +277,20 @@ def plot_umap_clusters(
             bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.75, edgecolor=colors[cid]),
         )
 
-    ax.set_title("The Semantic Landscape of NLP Research (2015–2024)",
-                 fontweight="bold", pad=14)
+    year_min = int(df['year'].min())
+    year_max = int(df['year'].max())
+    ax.set_title(
+        f"The Semantic Landscape of TACL Research ({year_min}–{year_max})",
+        fontweight="bold",
+        pad=14,
+    )
     ax.set_xlabel("UMAP Dimension 1")
     ax.set_ylabel("UMAP Dimension 2")
     ax.legend(loc="upper right", markerscale=4, framealpha=0.9)
     fig.tight_layout()
 
     if save:
-        _savefig(fig, "umap_cluster_map.png")
+        _savefig(fig, "umap_cluster_map.png", dpi=300)
     return fig
 
 
@@ -293,8 +351,10 @@ def plot_topic_market_share(
         alpha=0.85,
     )
 
+    year_min = int(pivot_pct.index.min())
+    year_max = int(pivot_pct.index.max())
     ax.set_title(
-        f"The Paradigm Shift: Market Share of Research Pillars ({year_start}–2024)",
+        f"The Paradigm Shift: Market Share of Research Pillars ({year_min}–{year_max})",
         fontweight="bold",
         pad=14,
     )
@@ -313,7 +373,7 @@ def plot_topic_market_share(
 
 
 # ---------------------------------------------------------------------------
-# Bonus: Abstract Length Distribution (Figure 0)
+# Abstract Length Distribution (Figure 0)
 # ---------------------------------------------------------------------------
 
 def plot_abstract_length_distribution(df: pd.DataFrame, save: bool = True) -> plt.Figure:

@@ -1,4 +1,3 @@
-arxiv==2.1.0
 pandas==2.2.0
 numpy==1.26.0
 sentence-transformers==3.0.0
@@ -7,7 +6,6 @@ scipy==1.13.0
 umap-learn==0.5.6
 matplotlib==3.9.0
 seaborn==0.13.2
-plotly==5.22.0
+requests==2.31.0
 tqdm==4.66.0
-jupyter==1.0.0
-unicodedata2==15.1.0
+psutil==5.9.7

@@ -2,7 +2,13 @@ import os
 import pandas as pd
 from text_processing import preprocess_dataframe
 from embedder import TextEmbedder
-from alignment import compute_alignment_scores, classify_papers, compute_yearly_stats, evaluate_k_range
+from alignment import (
+    compute_alignment_scores,
+    classify_papers,
+    compute_yearly_stats,
+    evaluate_k_range,
+    build_alignment_inspection_table,
+)
 from visualizer import (
     plot_paper_volume,
     plot_abstract_length_distribution,
@@ -10,9 +16,19 @@ from visualizer import (
     plot_drift_over_time,
     plot_umap_clusters,
     plot_topic_market_share,
+    plot_inspection_table,
 )
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
+
+# Heuristic cluster labels for visualization.
+# These are manually assigned topic names for the three KMeans clusters
+# and should be treated as interpretive labels rather than canonical categories.
+CLUSTER_LABELS = {
+    0: 'Traditional NLP',
+    1: 'Deep Learning NLP',
+    2: 'LLMs / Generative AI',
+}
 
 try:
     from umap import UMAP
@@ -21,27 +37,28 @@ except ImportError:
     HAS_UMAP = False
 
 
+JOURNAL_NAME = 'Transactions of the Association for Computational Linguistics (TACL)'
+AIMS_AND_SCOPE = (
+    'Transactions of the Association for Computational Linguistics (TACL) publishes papers across the full spectrum of computational linguistics and natural language processing. '
+    'The journal emphasizes high-quality computational methods, empirical evaluation, and linguistic analysis for tasks such as syntax, semantics, discourse, pragmatics, information extraction, machine translation, summarization, question answering, dialogue systems, and language generation. '
+    'TACL prioritizes work that advances the theoretical foundations, architectures, datasets, resources, and applications of language technologies within an editorially curated journal scope.'
+)
+
+
 def main():
     if not os.path.exists('dataset_nlp_cl.csv'):
         raise SystemExit('dataset_nlp_cl.csv not found; cannot continue.')
 
     df_raw = pd.read_csv('dataset_nlp_cl.csv', sep='|')
-    print(f'Loaded dataset with {len(df_raw)} rows; years {df_raw["year"].min()}-{df_raw["year"].max()}')
+    print(f'[main] Using journal-scoped dataset: {JOURNAL_NAME}')
+    print(f'[main] Loaded dataset with {len(df_raw)} rows; years {df_raw["year"].min()}-{df_raw["year"].max()}')
+    print(f'[main] Dataset source: OpenAlex journal articles for {JOURNAL_NAME}')
 
     df = preprocess_dataframe(df_raw)
     plot_paper_volume(df, save=True)
     plot_abstract_length_distribution(df, save=True)
 
     embedder = TextEmbedder(device='cpu')
-    AIMS_AND_SCOPE = (
-        'Computational Linguistics is the longest-running publication dedicated to the computational '
-        'and mathematical aspects of language. The journal publishes research on all aspects of natural '
-        'language processing and computational linguistics, including syntax, semantics, pragmatics, discourse, '
-        'machine translation, information extraction, text summarization, question answering, dialogue systems, '
-        'and language generation. The journal covers both theoretical foundations and practical applications, '
-        'with emphasis on computational methods, empirical evaluation, and the development of language resources and tools.'
-    )
-
     scope_embedding = embedder.encode_scope(AIMS_AND_SCOPE)
     paper_embeddings = embedder.encode_or_load(
         texts=df['input_text'].tolist(),
@@ -56,6 +73,14 @@ def main():
     df['alignment_score'] = scores
     df, mean_score, std_score = classify_papers(df)
     print(f'Mean alignment: {mean_score:.4f}, std: {std_score:.4f}')
+
+    inspection_table = build_alignment_inspection_table(df)
+    plot_inspection_table(
+        inspection_table,
+        filename='alignment_inspection_table.png',
+        save=True,
+    )
+
     plot_alignment_distribution(df, save=True)
 
     yearly_stats = compute_yearly_stats(df)
@@ -69,7 +94,14 @@ def main():
     df['cluster'] = kmeans.fit_predict(paper_embeddings)
 
     if HAS_UMAP:
-        umap_model = UMAP(n_components=2, random_state=42, metric='cosine', init='spectral')
+        umap_model = UMAP(
+            n_components=2,
+            n_neighbors=20,
+            min_dist=0.03,
+            random_state=42,
+            metric='cosine',
+            init='spectral',
+        )
         projection = umap_model.fit_transform(paper_embeddings)
     else:
         pca_model = PCA(n_components=2, random_state=42)
@@ -80,19 +112,22 @@ def main():
 
     plot_umap_clusters(
         df,
-        cluster_labels={0: 'Traditional NLP', 1: 'Deep Learning NLP', 2: 'LLMs / Generative AI'},
+        cluster_labels=CLUSTER_LABELS,
         save=True,
     )
     plot_topic_market_share(
         df,
-        cluster_labels={0: 'Traditional NLP', 1: 'Deep Learning NLP', 2: 'LLMs / Generative AI'},
+        cluster_labels=CLUSTER_LABELS,
         year_start=2022,
         save=True,
     )
 
     print('Generated PNG files:')
-    for fname in sorted(f for f in os.listdir('.') if f.endswith('.png')):
-        print(' ', fname)
+    if os.path.isdir('visualizations'):
+        for fname in sorted(f for f in os.listdir('visualizations') if f.endswith('.png')):
+            print(' ', os.path.join('visualizations', fname))
+    else:
+        print('  (no visualizations directory found)')
 
 
 if __name__ == '__main__':

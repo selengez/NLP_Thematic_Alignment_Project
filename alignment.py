@@ -1,17 +1,19 @@
 """
 alignment.py
 ------------
-Computes cosine similarity between paper embeddings and the scope embedding,
-classifies papers by alignment level, and aggregates yearly statistics.
+Computes cosine similarity between TACL article embeddings and the journal
+Aims & Scope embedding, then classifies articles by alignment level and
+aggregates yearly statistics.
 
 METHODOLOGY:
-    1. Each paper embedding is compared to the single scope_embedding vector
-       (768d, representing the journal's Aims & Scope) using cosine similarity.
-    2. Z-score outlier detection identifies papers significantly below or above
-       the mean — same method as the medical-AI example project.
-    3. Yearly aggregation feeds the thematic-drift visualisation (RQ2).
+    1. Each article embedding is compared to the TACL scope embedding using
+       cosine similarity.
+    2. Z-scores are used to label articles as high-alignment, aligned, or
+       low-alignment outliers.
+    3. Yearly aggregation is used to analyse thematic drift over time.
 """
 
+import textwrap
 from sklearn.metrics.pairwise import cosine_similarity
 from scipy import stats
 import numpy as np
@@ -64,7 +66,7 @@ def classify_papers(df: pd.DataFrame) -> Tuple[pd.DataFrame, float, float]:
     Parameters
     ----------
     df : pd.DataFrame
-        Must contain the 'alignment_score' column.
+         contain the 'alignment_score' column.
 
     Returns
     -------
@@ -104,7 +106,7 @@ def compute_yearly_stats(df: pd.DataFrame) -> pd.DataFrame:
     Parameters
     ----------
     df : pd.DataFrame
-        Must contain 'year' and 'alignment_score' columns.
+        'year' and 'alignment_score' columns.
 
     Returns
     -------
@@ -123,6 +125,30 @@ def compute_yearly_stats(df: pd.DataFrame) -> pd.DataFrame:
         .reset_index()
     )
     return yearly
+
+
+def build_alignment_inspection_table(df: pd.DataFrame) -> pd.DataFrame:
+    """Build a qualitative inspection table for the highest and lowest alignment papers."""
+    top = df.nlargest(1, "alignment_score").copy()
+    top["Type"] = "High"
+    top["Inspection note"] = "Central NLP theme."
+
+    bottom = df.nsmallest(1, "alignment_score").copy()
+    bottom["Type"] = "Low"
+    bottom["Inspection note"] = "Less direct scope match."
+
+    table = pd.concat([top, bottom], ignore_index=True)[
+        ["Type", "title", "year", "alignment_score", "Inspection note"]
+    ]
+    table["title"] = table["title"].astype(str).apply(
+        lambda s: textwrap.shorten(s, width=40, placeholder="...")
+    )
+    table["Inspection note"] = table["Inspection note"].astype(str).apply(
+        lambda s: textwrap.shorten(s, width=40, placeholder="...")
+    )
+    table = table.rename(columns={"alignment_score": "Score"})
+    table["Score"] = table["Score"].round(3)
+    return table
 
 
 # ---------------------------------------------------------------------------

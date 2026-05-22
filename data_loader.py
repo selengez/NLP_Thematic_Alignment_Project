@@ -1,175 +1,201 @@
 """
 data_loader.py
 --------------
-Fetches computational linguistics papers from arXiv (cat:cs.CL).
-No API key required. Uses the official `arxiv` Python library.
+Fetches journal articles from OpenAlex for a target journal while preserving the
+existing dataset schema.
 
-If the CSV already exists on disk, it is loaded directly — no re-fetching.
+Output columns:
+id | title | abstract | published | year | categories
 """
-
-import arxiv
-import datetime
-import pandas as pd
 import os
+import time
+import requests
+import pandas as pd
 from tqdm import tqdm
-from typing import Optional
+from typing import Optional, Dict, List, Any
 
 
-class ArxivLoader:
-    """Loads cs.CL papers from arXiv and saves them to a pipe-separated CSV."""
+def reconstruct_abstract(inverted_index: Optional[Dict[str, List[int]]]) -> Optional[str]:
+    """
+    Reconstruct OpenAlex abstract text from abstract_inverted_index.
+    """
+    if not inverted_index:
+        return None
 
+    position_to_word = {}
+    for word, positions in inverted_index.items():
+        for pos in positions:
+            position_to_word[pos] = word
+
+    return " ".join(position_to_word[i] for i in sorted(position_to_word))
+
+
+class JournalLoader:
+    """
+    Loads articles from a specific journal using OpenAlex.
+
+
+    Output DataFrame columns:
+    id, title, abstract, published, year, categories
+    """
     def __init__(
         self,
-        query: str = "cat:cs.CL",
+        journal_name: str = "Transactions of the Association for Computational Linguistics",
+        issn: str = "2307-387X",
         limit: int = 5000,
-        start_year: Optional[int] = None,
-        end_year: Optional[int] = None,
-        year_span: Optional[int] = None,
+        start_year: int = 2015,
+        end_year: int = 2025,
+        mailto: Optional[str] = None,
     ):
-        self.query = query
+        self.journal_name = journal_name
+        self.issn = issn
         self.limit = limit
-        current_year = datetime.datetime.now().year
+        self.start_year = start_year
+        self.end_year = end_year
+        self.mailto = mailto
+        self.base_url = "https://api.openalex.org"
 
-        if year_span is not None:
-            self.end_year = end_year if end_year is not None else current_year
-            self.start_year = start_year if start_year is not None else self.end_year - year_span + 1
-        else:
-            self.start_year = start_year if start_year is not None else 2015
-            self.end_year = end_year if end_year is not None else 2024
-        self.year_span = year_span
-        self.client = arxiv.Client(
-            page_size=200,
-            delay_seconds=3.0,
-            num_retries=3,
-        )
+    def _add_mailto(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        if self.mailto:
+            params["mailto"] = self.mailto
+        return params
+
+    def get_source_id(self) -> str:
+        url = f"{self.base_url}/sources/issn:{self.issn}"
+        response = requests.get(url, params=self._add_mailto({}), timeout=30)
+        response.raise_for_status()
+
+        source = response.json()
+        source_id = source["id"].replace("https://openalex.org/", "")
+
+        print(f"[journal_loader] Journal found: {source.get('display_name')}")
+        print(f"[journal_loader] Source ID: {source_id}")
+
+        return source_id
 
     def fetch_data(
         self,
         save_path: str = "dataset_nlp_cl.csv",
-        sample_yearly: bool = True,
-        sample_years: Optional[int] = None,
         force_refresh: bool = False,
     ) -> pd.DataFrame:
-        """
-        Fetch papers or load from CSV if it already exists.
 
-        Parameters
-        ----------
-        save_path : str
-            Path to the pipe-separated CSV cache file.
-        sample_yearly : bool
-            Whether to sample evenly across the year range.
-        sample_years : Optional[int]
-            If set, only sample this many years starting from start_year.
-        force_refresh : bool
-            If True, ignore the existing CSV cache and re-fetch from arXiv.
-
-        Returns
-        -------
-        pd.DataFrame
-            DataFrame with columns: id, title, abstract, published, year, categories.
-        """
         if save_path and os.path.exists(save_path) and not force_refresh:
-            print(f"[data_loader] CSV found at '{save_path}' — loading from disk.")
+            print(f"[journal_loader] CSV found at '{save_path}' — loading from disk.")
             df = pd.read_csv(save_path, sep="|")
             print(
-                f"[data_loader] Loaded {len(df)} papers | "
+                f"[journal_loader] Loaded {len(df)} papers | "
                 f"{df['year'].min()}–{df['year'].max()}"
             )
             return df
-        elif save_path and os.path.exists(save_path) and force_refresh:
-            print(f"[data_loader] CSV found at '{save_path}' but force_refresh=True, re-fetching.")
 
-        print(
-            f"[data_loader] Fetching up to {self.limit} papers "
-            f"from arXiv (query='{self.query}') …"
+        source_id = self.get_source_id()
+
+        filters = ",".join(
+            [
+                f"primary_location.source.id:{source_id}",
+                f"from_publication_date:{self.start_year}-01-01",
+                f"to_publication_date:{self.end_year}-12-31",
+                "has_abstract:true",
+                "type:article",
+            ]
         )
 
-        results = []
-        if sample_yearly:
-            years = list(range(self.start_year, self.end_year + 1))
-            if sample_years is not None:
-                years = years[-sample_years:]
-            base_limit, extra = divmod(self.limit, len(years))
+        rows = []
+        cursor = "*"
 
-            with tqdm(total=self.limit, desc="Fetching papers", unit="paper") as pbar:
-                for index, year in enumerate(years):
-                    if len(results) >= self.limit:
+        print(
+            f"[journal_loader] Fetching up to {self.limit} articles from "
+            f"'{self.journal_name}' for {self.start_year}–{self.end_year}..."
+        )
+
+        with tqdm(total=self.limit, desc="Fetching journal articles", unit="article") as pbar:
+            while cursor and len(rows) < self.limit:
+                url = f"{self.base_url}/works"
+                params = self._add_mailto(
+                    {
+                        "filter": filters,
+                        "per-page": 200,
+                        "cursor": cursor,
+                        "sort": "publication_date:asc",
+                        "select": ",".join(
+                            [
+                                "id",
+                                "doi",
+                                "title",
+                                "publication_date",
+                                "publication_year",
+                                "abstract_inverted_index",
+                                "primary_location",
+                            ]
+                        ),
+                    }
+                )
+
+                response = requests.get(url, params=params, timeout=60)
+                response.raise_for_status()
+                data = response.json()
+
+                results = data.get("results", [])
+                if not results:
+                    break
+
+                for work in results:
+                    if len(rows) >= self.limit:
                         break
 
-                    year_query = (
-                        f"{self.query} AND submittedDate:[{year}01010000 TO {year}12312359]"
-                    )
-                    year_limit = min(
-                        base_limit + (1 if index < extra else 0),
-                        self.limit - len(results),
-                    )
-                    search = arxiv.Search(
-                        query=year_query,
-                        max_results=year_limit,
-                        sort_by=arxiv.SortCriterion.SubmittedDate,
-                        sort_order=arxiv.SortOrder.Ascending,
-                    )
+                    abstract = reconstruct_abstract(work.get("abstract_inverted_index"))
 
-                    for r in self.client.results(search):
-                        if len(results) >= self.limit:
-                            break
-                        try:
-                            results.append(
-                                {
-                                    "id": r.entry_id,
-                                    "title": r.title,
-                                    "abstract": r.summary.replace("\n", " "),
-                                    "published": r.published,
-                                    "year": r.published.year,
-                                    "categories": str(r.categories),
-                                }
-                            )
-                            pbar.update(1)
-                        except Exception as e:
-                            print(f"[data_loader] Skipping a record due to error: {e}")
-                            continue
-        else:
-            search = arxiv.Search(
-                query=f"{self.query} AND submittedDate:[{self.start_year}01010000 TO {self.end_year}12312359]",
-                max_results=self.limit,
-                sort_by=arxiv.SortCriterion.SubmittedDate,
-                sort_order=arxiv.SortOrder.Ascending,
-            )
-
-            with tqdm(total=self.limit, desc="Fetching papers", unit="paper") as pbar:
-                for r in self.client.results(search):
-                    try:
-                        results.append(
-                            {
-                                "id": r.entry_id,
-                                "title": r.title,
-                                "abstract": r.summary.replace("\n", " "),
-                                "published": r.published,
-                                "year": r.published.year,
-                                "categories": str(r.categories),
-                            }
-                        )
-                        pbar.update(1)
-                    except Exception as e:
-                        print(f"[data_loader] Skipping a record due to error: {e}")
+                    if not abstract or len(abstract) <= 80:
                         continue
 
-        df = pd.DataFrame(results)
+                    rows.append(
+                        {
+                            "id": work.get("doi") or work.get("id"),
+                            "title": work.get("title"),
+                            "abstract": abstract,
+                            "published": work.get("publication_date"),
+                            "year": work.get("publication_year"),
+                            "categories": str([self.journal_name]),
+                        }
+                    )
 
-        # ---------- Cleaning ----------
-        df = df[df["abstract"].str.len() > 80]            # drop near-empty abstracts
-        df = df.drop_duplicates(subset=["id"])             # remove duplicate papers
+                    pbar.update(1)
+
+                cursor = data.get("meta", {}).get("next_cursor")
+                time.sleep(0.5)
+
+        df = pd.DataFrame(rows)
+
+        df = df.dropna(subset=["id", "title", "abstract", "published", "year"])
+        df = df[df["abstract"].str.len() > 80]
+        df = df.drop_duplicates(subset=["id"])
         df = df[df["year"].between(self.start_year, self.end_year)]
         df = df.reset_index(drop=True)
 
         print(
-            f"[data_loader] Fetched {len(df)} papers | "
+            f"[journal_loader] Final dataset: {len(df)} articles | "
             f"{df['year'].min()}–{df['year'].max()}"
         )
 
         if save_path:
             df.to_csv(save_path, sep="|", index=False)
-            print(f"[data_loader] Dataset saved to '{save_path}'.")
+            print(f"[journal_loader] Dataset saved to '{save_path}'.")
 
         return df
+
+
+if __name__ == "__main__":
+    loader = JournalLoader(
+        journal_name="Transactions of the Association for Computational Linguistics",
+        issn="2307-387X",
+        limit=5000,
+        start_year=2015,
+        end_year=2025,
+    )
+
+    df = loader.fetch_data(
+        save_path="dataset_nlp_cl.csv",
+        force_refresh=True,
+    )
+
+    print(df.head())
